@@ -1,0 +1,26 @@
+This repository's source code is distributed under the MIT License.
+
+The neural network weights and related upstream model artifacts used with this
+code are not covered by the MIT License unless explicitly stated elsewhere.
+
+Upstream DiariZen-derived weights and related model assets originate from the
+DiariZen project and associated upstream dependencies. Those upstream model
+weights are subject to their own licenses and usage restrictions.
+
+For the DiariZen-derived weight bundle referenced by this repository, treat the
+upstream model weights as CC-BY-NC-4.0 unless a more specific upstream notice
+for a particular asset says otherwise.
+
+That means, in practical terms:
+
+- this repository's code is MIT licensed
+- upstream DiariZen-derived weights are non-commercial
+- redistribution and use of weights should preserve the required attribution
+- you are responsible for reviewing the upstream licenses before shipping or
+  redistributing model artifacts
+
+Relevant upstream sources include:
+
+- DiariZen: https://github.com/BUTSpeechFIT/DiariZen
+- DiariZen model repo: https://huggingface.co/BUT-FIT/diarizen-wavlm-large-s80-md
+- pyannote WeSpeaker model: https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM

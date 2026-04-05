@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diarizen-onnx"
+version = "0.1.0"
+description = "Minimal ONNX Runtime reference implementation of the DiariZen-style diarization pipeline."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Christopher Thompson" }
+]
+dependencies = [
+  "numpy>=1.26",
+  "onnxruntime>=1.17",
+  "scipy>=1.11",
+  "soundfile>=0.12",
+]
+
+[project.optional-dependencies]
+cuda = ["onnxruntime-gpu>=1.17"]
+export = [
+  "huggingface_hub>=0.23",
+  "onnx>=1.16",
+  "pyannote.audio>=3.1",
+  "toml>=0.10",
+  "torch>=2.1",
+  "torchaudio>=2.1",
+]
+dev = [
+  "build>=1.2",
+]
+
+[project.scripts]
+diarizen-onnx = "diarizen_onnx.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
