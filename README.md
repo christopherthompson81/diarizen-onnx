@@ -4,6 +4,13 @@ Minimal Python reference implementation of the current Parakeet C# DiariZen pipe
 
 This repository is intended to stay close to the C# implementation in `parakeet_csharp`, not to be a full reimplementation of the original DiariZen Python stack.
 
+It includes:
+
+- a standalone diarization CLI
+- ONNX export helpers for the segmentation and WeSpeaker models
+- a lightweight runtime dependency set
+- licensing/NOTICE files that separate MIT-licensed code from upstream model-weight terms
+
 ## What it includes
 
 - ONNX Runtime diarization pipeline with:
