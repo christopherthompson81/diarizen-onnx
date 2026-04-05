@@ -1,0 +1,10 @@
+# Full-featured development environment for diarizen-onnx.
+# This venv is intended to support:
+# - reference weight download
+# - ONNX export scripts
+# - CPU inference
+#
+# For CUDA inference, replace the CPU ONNX Runtime package with:
+#   pip uninstall -y onnxruntime onnxruntime-gpu
+#   pip install --force-reinstall --no-cache-dir "onnxruntime-gpu>=1.17"
+-e .[export]

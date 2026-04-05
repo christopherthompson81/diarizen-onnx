@@ -21,43 +21,65 @@ Notes:
 """
 
 import argparse
+import importlib.util
 import inspect
+import os
+import pkgutil
 import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 import onnx
-from huggingface_hub import snapshot_download, hf_hub_download
+import torch
+from huggingface_hub import snapshot_download
 
 
-def load_diarizen_segmentation_model(model_dir: Path):
-    """Load the DiariZen segmentation model from a Hugging Face snapshot."""
-    # Import after path setup
-    import os
-    
-    # Add temporary paths for imports - try multiple locations
-    possible_roots = [
-        Path(__file__).resolve().parents[2] / "DiariZen",
-        Path("/home/chris/Programming/DiariZen"),
-    ]
-    
-    diarizen_root = None
-    for root in possible_roots:
+def resolve_diarizen_root(explicit_root: Path | None) -> Path:
+    candidates: list[Path] = []
+    if explicit_root is not None:
+        candidates.append(explicit_root)
+
+    env_root = os.environ.get("DIARIZEN_ROOT")
+    if env_root:
+        candidates.append(Path(env_root))
+
+    candidates.extend(
+        [
+            Path(__file__).resolve().parents[2] / "DiariZen",
+            Path("/home/chris/Programming/DiariZen"),
+        ]
+    )
+
+    for root in candidates:
         if root.exists() and (root / "diarizen").exists():
-            diarizen_root = root
-            break
-    
-    if diarizen_root is None:
-        raise FileNotFoundError(
-            f"DiariZen repository not found. Searched:\n" + 
-            "\n".join(f"  - {r}" for r in possible_roots)
-        )
-    
+            return root.resolve()
+
+    searched = "\n".join(f"  - {path}" for path in candidates)
+    raise FileNotFoundError(
+        "DiariZen repository not found. Pass --diarizen-root or set DIARIZEN_ROOT.\n"
+        f"Searched:\n{searched}"
+    )
+
+
+def load_diarizen_segmentation_model(model_dir: Path, diarizen_root: Path):
+    """Load the DiariZen segmentation model from a Hugging Face snapshot."""
     print(f"Using DiariZen from: {diarizen_root}")
     sys.path.insert(0, str(diarizen_root))
-    sys.path.insert(0, str(diarizen_root / "pyannote-audio"))
-    
+    local_pyannote_root = diarizen_root / "pyannote-audio" / "pyannote"
+    local_pyannote_init = local_pyannote_root / "__init__.py"
+    if not local_pyannote_init.exists():
+        raise FileNotFoundError(f"Local pyannote package not found at {local_pyannote_init}")
+
+    # Load the bundled pyannote-audio namespace package explicitly so it does
+    # not get shadowed by separately installed pyannote namespace packages.
+    spec = importlib.util.spec_from_file_location("pyannote", local_pyannote_init)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load pyannote namespace from {local_pyannote_init}")
+    pyannote = importlib.util.module_from_spec(spec)
+    sys.modules["pyannote"] = pyannote
+    spec.loader.exec_module(pyannote)
+    pyannote.__path__ = pkgutil.extend_path([str(local_pyannote_root)], pyannote.__name__)
+
     from diarizen.models.eend.model_wavlm_conformer import Model as WavLMConformerModel
     
     # Load config.toml to get model parameters  
@@ -143,6 +165,7 @@ def load_diarizen_segmentation_model(model_dir: Path):
 def export_segmentation_model(model, output_path: Path, chunk_duration: float = 16.0):
     """Export the segmentation model to ONNX."""
     print(f"\nExporting segmentation model to {output_path}...")
+    model.eval()
     
     # Create dummy input: (batch=1, channels=1, samples)
     sample_rate = 16000
@@ -170,8 +193,6 @@ def export_segmentation_model(model, output_path: Path, chunk_duration: float = 
         },
         opset_version=18,  # Updated to match PyTorch's recommended version
         do_constant_folding=True,
-        # Use the legacy exporter for better compatibility with complex models
-        _exported_model=None,
     )
     
     # Validate the ONNX model
@@ -247,11 +268,18 @@ def main():
         action="store_true",
         help="Test exported model with ONNX Runtime"
     )
+    parser.add_argument(
+        "--diarizen-root",
+        type=Path,
+        default=None,
+        help="Path to a local DiariZen checkout (defaults to DIARIZEN_ROOT or common local paths)",
+    )
     
     args = parser.parse_args()
     
     # Create output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    diarizen_root = resolve_diarizen_root(args.diarizen_root)
     
     # Download DiariZen model
     print(f"Downloading DiariZen model: {args.model_repo}")
@@ -259,7 +287,7 @@ def main():
     print(f"  Model downloaded to: {model_dir}\n")
     
     # Export segmentation model
-    seg_model = load_diarizen_segmentation_model(model_dir)
+    seg_model = load_diarizen_segmentation_model(model_dir, diarizen_root)
     seg_output = args.output_dir / "diarizen_segmentation.onnx"
     
     # Get chunk duration from config for export

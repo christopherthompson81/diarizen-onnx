@@ -27,7 +27,11 @@ Usage:
 """
 
 import argparse
+import importlib.util
+import os
+import pkgutil
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -35,20 +39,52 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import onnx
+from torch.jit import TracerWarning
 
 
-def setup_paths():
-    possible_roots = [
-        Path(__file__).resolve().parents[2] / "DiariZen",
-        Path("/home/chris/Programming/DiariZen"),
-    ]
-    for root in possible_roots:
+def resolve_diarizen_root(explicit_root: Path | None) -> Path:
+    candidates: list[Path] = []
+    if explicit_root is not None:
+        candidates.append(explicit_root)
+
+    env_root = os.environ.get("DIARIZEN_ROOT")
+    if env_root:
+        candidates.append(Path(env_root))
+
+    candidates.extend(
+        [
+            Path(__file__).resolve().parents[2] / "DiariZen",
+            Path("/home/chris/Programming/DiariZen"),
+        ]
+    )
+
+    for root in candidates:
         if root.exists() and (root / "diarizen").exists():
-            sys.path.insert(0, str(root))
-            sys.path.insert(0, str(root / "pyannote-audio"))
-            print(f"Using DiariZen from: {root}")
-            return
-    raise FileNotFoundError("DiariZen repository not found")
+            return root.resolve()
+
+    searched = "\n".join(f"  - {path}" for path in candidates)
+    raise FileNotFoundError(
+        "DiariZen repository not found. Pass --diarizen-root or set DIARIZEN_ROOT.\n"
+        f"Searched:\n{searched}"
+    )
+
+
+def setup_paths(diarizen_root: Path) -> None:
+    sys.path.insert(0, str(diarizen_root))
+    print(f"Using DiariZen from: {diarizen_root}")
+
+    local_pyannote_root = diarizen_root / "pyannote-audio" / "pyannote"
+    local_pyannote_init = local_pyannote_root / "__init__.py"
+    if not local_pyannote_init.exists():
+        raise FileNotFoundError(f"Local pyannote package not found at {local_pyannote_init}")
+
+    spec = importlib.util.spec_from_file_location("pyannote", local_pyannote_init)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load pyannote namespace from {local_pyannote_init}")
+    pyannote = importlib.util.module_from_spec(spec)
+    sys.modules["pyannote"] = pyannote
+    spec.loader.exec_module(pyannote)
+    pyannote.__path__ = pkgutil.extend_path([str(local_pyannote_root)], pyannote.__name__)
 
 
 class FbankEmbeddingWrapper(nn.Module):
@@ -89,7 +125,7 @@ class FbankEmbeddingWrapper(nn.Module):
         out = self.resnet.layer3(out)
         out = self.resnet.layer4(out)
 
-        if weights is not None and weights.shape[1] != out.shape[-1]:
+        if weights is not None:
             weights = F.interpolate(
                 weights.unsqueeze(1), size=out.shape[-1], mode="nearest"
             ).squeeze(1)
@@ -108,7 +144,17 @@ def load_model():
         filename="pytorch_model.bin",
     )
     print(f"Loading from {ckpt_path}")
-    model = Model.from_pretrained(ckpt_path)
+    original_torch_load = torch.load
+
+    def trusted_torch_load(*args, **kwargs):
+        kwargs["weights_only"] = False
+        return original_torch_load(*args, **kwargs)
+
+    torch.load = trusted_torch_load
+    try:
+        model = Model.from_pretrained(ckpt_path)
+    finally:
+        torch.load = original_torch_load
     model.eval()
 
     # Verify hyperparameters
@@ -127,8 +173,31 @@ def load_model():
     return model
 
 
+def set_symbolic_batch_dimension(model_path: Path) -> None:
+    """Fix exported ONNX shape metadata so ORT does not warn on batched output."""
+    model_proto = onnx.load(str(model_path))
+    changed = False
+
+    for value_info in model_proto.graph.output:
+        tensor_type = value_info.type.tensor_type
+        if not tensor_type.HasField("shape"):
+            continue
+        dims = tensor_type.shape.dim
+        if len(dims) < 2:
+            continue
+        batch_dim = dims[0]
+        if batch_dim.HasField("dim_value") or not batch_dim.HasField("dim_param"):
+            batch_dim.ClearField("dim_value")
+            batch_dim.dim_param = "batch"
+            changed = True
+
+    if changed:
+        onnx.save(model_proto, str(model_path))
+
+
 def export_model(wrapper: FbankEmbeddingWrapper, output_path: Path):
     print(f"\nExporting to {output_path} ...")
+    wrapper.eval()
     dummy = torch.zeros(1, 249, 80)
     dummy_weights = torch.ones(1, 249)
 
@@ -136,38 +205,53 @@ def export_model(wrapper: FbankEmbeddingWrapper, output_path: Path):
         out = wrapper(dummy, dummy_weights if wrapper.with_weights else None)
     print(f"  PyTorch: input {tuple(dummy.shape)} -> output {tuple(out.shape)}")
 
-    if wrapper.with_weights:
-        torch.onnx.export(
-            wrapper,
-            (dummy, dummy_weights),
-            str(output_path),
-            input_names=["fbank", "weights"],
-            output_names=["embedding"],
-            dynamic_axes={
-                "fbank":     {0: "batch", 1: "frames"},
-                "weights":   {0: "batch", 1: "frames"},
-                "embedding": {0: "batch"},
-            },
-            opset_version=17,
-            do_constant_folding=True,
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="You are using the legacy TorchScript-based ONNX export.*",
+            category=DeprecationWarning,
         )
-    else:
-        torch.onnx.export(
-            wrapper,
-            dummy,
-            str(output_path),
-            input_names=["fbank"],
-            output_names=["embedding"],
-            dynamic_axes={
-                "fbank":     {0: "batch", 1: "frames"},
-                "embedding": {0: "batch"},
-            },
-            opset_version=17,
-            do_constant_folding=True,
+        warnings.filterwarnings(
+            "ignore",
+            message="Converting a tensor to a Python boolean might cause the trace to be incorrect.*",
+            category=TracerWarning,
         )
+
+        if wrapper.with_weights:
+            torch.onnx.export(
+                wrapper,
+                (dummy, dummy_weights),
+                str(output_path),
+                input_names=["fbank", "weights"],
+                output_names=["embedding"],
+                dynamic_axes={
+                    "fbank":     {0: "batch", 1: "frames"},
+                    "weights":   {0: "batch", 1: "frames"},
+                    "embedding": {0: "batch"},
+                },
+                opset_version=18,
+                do_constant_folding=True,
+                dynamo=False,
+            )
+        else:
+            torch.onnx.export(
+                wrapper,
+                dummy,
+                str(output_path),
+                input_names=["fbank"],
+                output_names=["embedding"],
+                dynamic_axes={
+                    "fbank":     {0: "batch", 1: "frames"},
+                    "embedding": {0: "batch"},
+                },
+                opset_version=18,
+                do_constant_folding=True,
+                dynamo=False,
+            )
 
     model_proto = onnx.load(str(output_path))
     onnx.checker.check_model(model_proto)
+    set_symbolic_batch_dimension(output_path)
     size_mb = output_path.stat().st_size / 1024 / 1024
     print(f"  OK: {size_mb:.1f} MB")
     print("  Input:  (batch, time_frames, 80) — Kaldi Fbank, 10ms shift, 25ms window")
@@ -202,6 +286,12 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=Path("./models"))
     parser.add_argument("--test", action="store_true")
     parser.add_argument(
+        "--diarizen-root",
+        type=Path,
+        default=None,
+        help="Path to a local DiariZen checkout (defaults to DIARIZEN_ROOT or common local paths)",
+    )
+    parser.add_argument(
         "--weighted",
         action="store_true",
         help="Export a variant that also accepts frame weights.",
@@ -209,7 +299,8 @@ def main():
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    setup_paths()
+    diarizen_root = resolve_diarizen_root(args.diarizen_root)
+    setup_paths(diarizen_root)
 
     model = load_model()
     wrapper = FbankEmbeddingWrapper(model, with_weights=args.weighted)

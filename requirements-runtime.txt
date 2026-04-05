@@ -1,0 +1,5 @@
+# Lightweight runtime environment for inference-only use.
+# For CUDA, install this file first, then swap ONNX Runtime packages:
+#   pip uninstall -y onnxruntime onnxruntime-gpu
+#   pip install --force-reinstall --no-cache-dir "onnxruntime-gpu>=1.17"
+-e .[cpu]

@@ -6,9 +6,19 @@ Download the public ONNX model bundle used by this reference implementation.
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
+
+MODEL_ALLOW_PATTERNS = [
+    "diarizen_segmentation.onnx",
+    "diarizen_segmentation.onnx.data",
+    "wespeaker_pyannote_weighted.onnx",
+    "wespeaker_pyannote_weighted.onnx.data",
+    "metadata.json",
+    "plda/*",
+]
 
 
 def main() -> None:
@@ -31,8 +41,11 @@ def main() -> None:
     snapshot_download(
         repo_id=args.repo_id,
         local_dir=str(local_dir),
-        local_dir_use_symlinks=False,
+        allow_patterns=MODEL_ALLOW_PATTERNS,
     )
+    cache_dir = local_dir / ".cache"
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)
     print(f"Downloaded model bundle to {local_dir}")
 
 

@@ -25,23 +25,67 @@ It includes:
 
 ## Install
 
+For the export workflow, use Python `3.10`. The runtime-only path is more
+forgiving, but the export scripts have been validated specifically on Python
+`3.10`.
+
 ```bash
-python -m venv .venv
+python3.10 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -r requirements.txt
 ```
 
-For GPU inference:
+That installs a practical all-in-one environment for:
+
+- downloading the reference ONNX bundle
+- exporting the ONNX models from upstream sources
+- CPU inference
+
+For GPU inference, switch the ONNX Runtime package in the same venv:
 
 ```bash
-pip install -e .[cuda]
+pip uninstall -y onnxruntime onnxruntime-gpu
+pip install --force-reinstall --no-cache-dir "onnxruntime-gpu>=1.17"
 ```
 
-For the export scripts:
+If you only want the minimal runtime dependencies instead of the full export environment:
 
 ```bash
-pip install -e .[export]
+pip install -r requirements-runtime.txt
 ```
+
+## Quick Start
+
+The most practical path is to download the already-exported reference ONNX bundle:
+
+```bash
+python scripts/download_reference_models.py --output-dir ./models
+diarizen-onnx \
+  --audio /path/to/audio.wav \
+  --model-dir ./models \
+  --provider cpu
+```
+
+For CUDA inference:
+
+```bash
+diarizen-onnx \
+  --audio /path/to/audio.wav \
+  --model-dir ./models \
+  --provider cuda \
+  --json
+```
+
+Minimal smoke test without a bundled audio sample:
+
+```bash
+python scripts/smoke_test.py --model-dir ./models --provider cpu
+python scripts/smoke_test.py --model-dir ./models --provider cuda
+```
+
+The smoke test generates a short synthetic WAV on the fly instead of shipping a
+test clip in the repository. That keeps the repo lightweight and avoids mixing
+code distribution with any sample-media licensing questions.
 
 ## Models
 
@@ -80,6 +124,14 @@ Those upstream repositories are the source of the non-commercial licensing
 constraints associated with the DiariZen-derived weights. See [`NOTICE`](./NOTICE)
 for the code-versus-weights license boundary.
 
+To download the public reference ONNX bundle used by this repository:
+
+```bash
+python scripts/download_reference_models.py --output-dir ./models
+```
+
+That command downloads the files expected by the runtime layout above.
+
 ## Run
 
 ```bash
@@ -95,6 +147,7 @@ JSON output:
 diarizen-onnx \
   --audio /path/to/audio.wav \
   --model-dir /path/to/models \
+  --provider cpu \
   --json
 ```
 
@@ -102,16 +155,109 @@ diarizen-onnx \
 
 Scripts are under [`scripts/`](./scripts):
 
+- `download_reference_models.py`
 - `export_diarizen_onnx.py`
 - `export_pyannote_wespeaker_onnx.py`
 - `export_lda_transform.py`
 
 These are intentionally thin wrappers around the upstream DiariZen and pyannote model definitions, so they require a compatible Python environment and access to the upstream checkpoints.
 
+### Export Everything From Upstream Sources
+
+If you want to produce the full runtime model folder yourself:
+
+1. Clone the upstream DiariZen repository with its dependencies:
+
+```bash
+git clone --recurse-submodules https://github.com/BUTSpeechFIT/DiariZen.git
+```
+
+2. Create and activate a venv, then install the export dependencies:
+
+```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+3. Export the segmentation model:
+
+```bash
+python scripts/export_diarizen_onnx.py \
+  --diarizen-root ./DiariZen \
+  --output-dir ./models
+```
+
+4. Export the weighted WeSpeaker embedder used by the runtime:
+
+```bash
+python scripts/export_pyannote_wespeaker_onnx.py \
+  --diarizen-root ./DiariZen \
+  --weighted \
+  --output-dir ./models
+```
+
+5. Export the LDA/PLDA binaries:
+
+```bash
+python scripts/export_lda_transform.py --output-dir ./models/plda
+```
+
+After those steps, `./models` should match the expected runtime layout shown above.
+
+You can then run inference directly from the exported model folder:
+
+```bash
+diarizen-onnx \
+  --audio /path/to/audio.wav \
+  --model-dir ./models \
+  --provider cuda \
+  --json
+```
+
+## Validated Matrix
+
+| Workflow | Python | Status |
+|---|---|---|
+| Reference-weight download | 3.10 | Validated |
+| Reference-weight CPU inference | 3.10 | Validated |
+| Reference-weight CUDA inference | 3.10 with CUDA-swapped runtime venv | Validated |
+| Synthetic smoke test script | 3.10 with CUDA-swapped runtime venv | Validated |
+| Export segmentation ONNX | 3.10 | Validated |
+| Export weighted WeSpeaker ONNX | 3.10 | Validated |
+| Export LDA/PLDA binaries | 3.10 | Validated |
+| CUDA inference from freshly exported models | 3.10 export + CUDA-swapped runtime venv | Validated |
+
+The export path has not been validated on Python `3.12`.
+
+## Troubleshooting
+
+- If CUDA inference fails after switching ONNX Runtime packages, run:
+
+```bash
+pip uninstall -y onnxruntime onnxruntime-gpu
+pip install --force-reinstall --no-cache-dir "onnxruntime-gpu>=1.17"
+```
+
+- If `python3.10 -m venv` is unavailable on your system, a `virtualenv`-based
+  equivalent also works:
+
+```bash
+virtualenv -p python3.10 .venv
+```
+
+- The export scripts expect a local DiariZen checkout. Pass it explicitly with
+  `--diarizen-root /path/to/DiariZen`.
+
+- The weighted WeSpeaker export currently writes a valid runtime model but may
+  still emit benign PyTorch/ONNX export warnings during conversion.
+
 ## Notes
 
 - Runtime dependencies are intentionally small: `numpy`, `scipy`, `onnxruntime`, `soundfile`.
 - Export dependencies are separate because they require PyTorch and Hugging Face tooling.
+- `requirements-runtime.txt` is the simplest inference-only setup.
+- `requirements.txt` is the practical all-in-one setup for download, export, and CPU inference.
 - The clustering path follows the current reference implementation behavior, including constrained per-chunk centroid assignment and the 1.0 s final same-speaker merge gap.
 
 ## License Boundary
