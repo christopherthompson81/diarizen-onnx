@@ -2,8 +2,8 @@
 """
 Export pyannote/wespeaker-voxceleb-resnet34-LM to ONNX.
 
-This is the weighted WeSpeaker model used by the current Parakeet-style
-DiariZen ONNX pipeline.
+This is the weighted WeSpeaker model used by the current DiariZen ONNX
+pipeline in this repository.
 - Input:  Kaldi Fbank features (batch, time_frames, 80) — 80 mel bins, 10 ms shift
 - Output: raw 256-dim speaker embedding
 

@@ -17,7 +17,7 @@ Dependencies:
 Notes:
     - This script constructs the model class from a local DiariZen checkout.
     - The resulting ONNX model matches the input/output contract used by
-      the reference Python implementation and Parakeet C#.
+      the reference Python implementation in this repository.
 """
 
 import argparse

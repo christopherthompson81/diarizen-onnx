@@ -1,8 +1,8 @@
 # diarizen-onnx
 
-Minimal Python reference implementation of the current Parakeet C# DiariZen pipeline, using ONNX Runtime for the neural models and NumPy/SciPy for the algorithmic pieces.
+Minimal Python reference implementation of a DiariZen-style ONNX diarization pipeline, using ONNX Runtime for the neural models and NumPy/SciPy for the algorithmic pieces.
 
-This repository is intended to stay close to the C# implementation in `parakeet_csharp`, not to be a full reimplementation of the original DiariZen Python stack.
+This repository is intended to stay close to the exported ONNX pipeline used here, not to be a full reimplementation of the original DiariZen Python stack.
 
 It includes:
 
@@ -63,7 +63,7 @@ models/
     plda_psi.bin
 ```
 
-If you want the already-exported ONNX bundle used in Parakeet, the current public reference location is:
+If you want the already-exported ONNX bundle used by this repository, the current public reference location is:
 
 `https://huggingface.co/christopherthompson81/diarizen_onnx`
 
@@ -99,10 +99,10 @@ These are intentionally thin wrappers around the upstream DiariZen and pyannote 
 
 - Runtime dependencies are intentionally small: `numpy`, `scipy`, `onnxruntime`, `soundfile`.
 - Export dependencies are separate because they require PyTorch and Hugging Face tooling.
-- The clustering path follows the current Parakeet C# behavior, including constrained per-chunk centroid assignment and the 1.0 s final same-speaker merge gap.
+- The clustering path follows the current reference implementation behavior, including constrained per-chunk centroid assignment and the 1.0 s final same-speaker merge gap.
 
 ## Status
 
-- This repository is intended to be a practical reference implementation of the current Parakeet C# DiariZen path, not a fresh redesign.
-- On the standard Parakeet sample, the current CUDA path is close to the C# output shape and runs in the same rough range, but it is still somewhat slower.
+- This repository is intended to be a practical reference implementation of the ONNX-based DiariZen path used here, not a fresh redesign.
+- On the standard sample used during development, the current CUDA path is close to the reference output shape and runs in the same rough range, but it is still somewhat slower.
 - The exported segmentation ONNX model currently falls back to single-chunk inference at runtime instead of stable multi-chunk batching.
