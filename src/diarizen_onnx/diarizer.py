@@ -393,6 +393,7 @@ class DiariZenDiarizer:
             count_contrib[frame_slice] += 1
 
         binary = np.zeros((total_frames, num_global_speakers), dtype=bool)
+        debug_frames = _create_reconstruction_debug_frames(total_frames)
         for frame_index in range(total_frames):
             if count_contrib[frame_index] <= 0:
                 continue
@@ -406,11 +407,20 @@ class DiariZenDiarizer:
             scores[contrib_mask] = (
                 activation_sums[frame_index, contrib_mask] / activation_contrib[frame_index, contrib_mask]
             )
-            ranked = np.argsort(scores)[::-1]
+            # Match the C# stable descending sort: higher score first, lower speaker index first on ties.
+            ranked = np.lexsort((np.arange(num_global_speakers, dtype=np.int32), -scores))
             for rank in ranked[:count]:
                 if scores[rank] <= 0:
                     break
                 binary[frame_index, rank] = True
+            _capture_reconstruction_debug_frame(
+                debug_frames,
+                frame_index,
+                float(average_count),
+                count,
+                scores,
+                binary[frame_index],
+            )
 
         _smooth_binary_timeline(
             binary,
@@ -431,6 +441,7 @@ class DiariZenDiarizer:
             if region_start is not None:
                 labeled.append((region_start, total_frames, f"speaker_{speaker_index}"))
 
+        _write_reconstruction_debug_frames(debug_frames)
         return _merge_adjacent_segments(labeled, self.config.frame_rate, self.config.merge_gap_frames)
 
 
@@ -936,3 +947,71 @@ def _merge_adjacent_segments(
             cur_start, cur_end, cur_speaker = start_frame, end_frame, speaker
     merged.append(DiarizationSegment(cur_start / frame_rate, cur_end / frame_rate, cur_speaker))
     return merged
+
+
+def _create_reconstruction_debug_frames(total_frames: int) -> list[dict[str, object]] | None:
+    window = _get_debug_reconstruction_window()
+    if window is None:
+        return None
+    start_frame, end_frame = window
+    start_frame = max(0, min(start_frame, total_frames))
+    end_frame = max(start_frame, min(end_frame, total_frames))
+    return [] if end_frame > start_frame else None
+
+
+def _capture_reconstruction_debug_frame(
+    debug_frames: list[dict[str, object]] | None,
+    frame_index: int,
+    average_count: float,
+    selected_count: int,
+    scores: np.ndarray,
+    selected: np.ndarray,
+) -> None:
+    if debug_frames is None:
+        return
+    window = _get_debug_reconstruction_window()
+    if window is None:
+        return
+    start_frame, end_frame = window
+    if frame_index < start_frame or frame_index >= end_frame:
+        return
+    debug_frames.append(
+        {
+            "frame_index": int(frame_index),
+            "time_seconds": frame_index / 50.0,
+            "average_count": float(average_count),
+            "selected_count": int(selected_count),
+            "scores": [float(x) for x in scores.tolist()],
+            "selected": [bool(x) for x in selected.tolist()],
+        }
+    )
+
+
+def _write_reconstruction_debug_frames(debug_frames: list[dict[str, object]] | None) -> None:
+    if debug_frames is None:
+        return
+    output_path = os.environ.get("DIARIZEN_ONNX_DEBUG_RECON_PATH")
+    if not output_path:
+        return
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(debug_frames, indent=2), encoding="utf-8")
+
+
+def _get_debug_reconstruction_window() -> tuple[int, int] | None:
+    raw = os.environ.get("DIARIZEN_ONNX_DEBUG_RECON_WINDOW")
+    if not raw:
+        return None
+    parts = [part.strip() for part in raw.split(",")]
+    if len(parts) != 2:
+        return None
+    try:
+        start_seconds = float(parts[0])
+        end_seconds = float(parts[1])
+    except ValueError:
+        return None
+    start_frame = int(np.floor(start_seconds * 50))
+    end_frame = int(np.ceil(end_seconds * 50))
+    if end_frame <= start_frame:
+        return None
+    return start_frame, end_frame
