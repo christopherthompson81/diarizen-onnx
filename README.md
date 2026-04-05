@@ -47,6 +47,10 @@ pip install -e .[export]
 
 This repository does not bundle the upstream DiariZen-derived weights.
 
+The MIT license in this repository applies to the source code only. It does not
+extend to model weights, checkpoints, or other upstream model artifacts unless a
+particular asset explicitly says otherwise.
+
 Expected model layout:
 
 ```text
@@ -66,6 +70,15 @@ models/
 If you want the already-exported ONNX bundle used by this repository, the current public reference location is:
 
 `https://huggingface.co/christopherthompson81/diarizen_onnx`
+
+Relevant upstream sources for the weight lineage and licensing context:
+
+- Upstream DiariZen project: `https://github.com/BUTSpeechFIT/DiariZen`
+- Upstream DiariZen model repo: `https://huggingface.co/BUT-FIT/diarizen-wavlm-large-s80-md`
+
+Those upstream repositories are the source of the non-commercial licensing
+constraints associated with the DiariZen-derived weights. See [`NOTICE`](./NOTICE)
+for the code-versus-weights license boundary.
 
 ## Run
 
@@ -100,6 +113,14 @@ These are intentionally thin wrappers around the upstream DiariZen and pyannote 
 - Runtime dependencies are intentionally small: `numpy`, `scipy`, `onnxruntime`, `soundfile`.
 - Export dependencies are separate because they require PyTorch and Hugging Face tooling.
 - The clustering path follows the current reference implementation behavior, including constrained per-chunk centroid assignment and the 1.0 s final same-speaker merge gap.
+
+## License Boundary
+
+- The source code in this repository is MIT licensed.
+- Model weights are not included in this repository.
+- DiariZen-derived weights referenced by this project are separate material with their own license terms.
+- The upstream DiariZen weight lineage should be treated as `CC BY-NC 4.0` unless a more specific upstream notice says otherwise.
+- If you use, redistribute, host, or ship weights, you are responsible for complying with the applicable upstream model licenses.
 
 ## Status
 
